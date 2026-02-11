@@ -1,0 +1,138 @@
+#!/bin/bash
+set -e
+
+CONFIG_FILE="$HOME/.bb-cli-config"
+
+# Load config
+if [ -f "$CONFIG_FILE" ]; then
+  source "$CONFIG_FILE"
+fi
+
+usage() {
+  echo "Usage:"
+  echo "  bb-cli configure                          - Set up token and defaults"
+  echo "  bb-cli create-pr <source> <dest> [title]   - Create a pull request"
+  echo "  bb-cli list-prs                            - List open pull requests"
+  echo "  bb-cli branches                            - List branches"
+  echo ""
+  echo "Examples:"
+  echo "  bb-cli create-pr test/pr-automate dev \"My PR title\""
+  echo "  bb-cli create-pr feature/login main"
+  echo "  bb-cli branches"
+  echo "  bb-cli list-prs"
+}
+
+configure() {
+  read -rp "Bitbucket token: " token
+  read -rp "Workspace: " workspace
+  read -rp "Repo: " repo
+
+  cat > "$CONFIG_FILE" <<EOF
+BB_TOKEN="$token"
+BB_WORKSPACE="$workspace"
+BB_REPO="$repo"
+EOF
+  chmod 600 "$CONFIG_FILE"
+  echo "✅ Config saved to $CONFIG_FILE"
+}
+
+api_call() {
+  local method="$1"
+  local endpoint="$2"
+  local data="$3"
+
+  local url="https://api.bitbucket.org/2.0/repositories/$BB_WORKSPACE/$BB_REPO$endpoint"
+
+  if [ -n "$data" ]; then
+    curl -s --request "$method" \
+      --url "$url" \
+      --header "Authorization: Bearer $BB_TOKEN" \
+      --header "Content-Type: application/json" \
+      --data "$data"
+  else
+    curl -s --request "$method" \
+      --url "$url" \
+      --header "Authorization: Bearer $BB_TOKEN"
+  fi
+}
+
+create_pr() {
+  local source="$1"
+  local dest="$2"
+  local title="${3:-PR: $source → $dest}"
+
+  if [ -z "$source" ] || [ -z "$dest" ]; then
+    echo "❌ Error: Missing branch names"
+    echo "Usage: bb-cli create-pr <source-branch> <dest-branch> [title]"
+    exit 1
+  fi
+
+  local payload=$(cat <<EOF
+{
+  "title": "$title",
+  "source": {"branch": {"name": "$source"}},
+  "destination": {"branch": {"name": "$dest"}},
+  "description": "Created via bb-cli",
+  "close_source_branch": false
+}
+EOF
+)
+
+  echo "Creating PR: $source → $dest"
+  result=$(api_call POST "/pullrequests" "$payload")
+  
+  # Try pretty print, fallback to raw
+  echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'id' in data:
+    print(f\"✅ PR #{data['id']} created: {data['links']['html']['href']}\")
+else:
+    print(f\"❌ Error: {data.get('error', {}).get('message', json.dumps(data))}\")
+" 2>/dev/null || echo "$result"
+}
+
+list_prs() {
+  result=$(api_call GET "/pullrequests?state=OPEN")
+  echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+prs = data.get('values', [])
+if not prs:
+    print('No open PRs')
+    sys.exit(0)
+print(f'Open PRs ({len(prs)}):')
+print()
+for pr in prs:
+    print(f\"  #{pr['id']} {pr['title']}\")
+    print(f\"     {pr['source']['branch']['name']} → {pr['destination']['branch']['name']}\")
+    print()
+" 2>/dev/null || echo "$result"
+}
+
+branches() {
+  result=$(api_call GET "/refs/branches?sort=-target.date&pagelen=20")
+  echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+branches = data.get('values', [])
+print(f'Branches ({len(branches)}):')
+print()
+for b in branches:
+    print(f\"  {b['name']}\")
+" 2>/dev/null || echo "$result"
+}
+
+# --- Main ---
+if [ -z "$BB_TOKEN" ] && [ "$1" != "configure" ]; then
+  echo "❌ Not configured. Run: bb-cli configure"
+  exit 1
+fi
+
+case "${1:-}" in
+  configure)   configure ;;
+  create-pr)   create_pr "$2" "$3" "$4" ;;
+  list-prs)    list_prs ;;
+  branches)    branches ;;
+  *)           usage ;;
+esac
