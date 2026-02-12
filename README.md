@@ -45,6 +45,10 @@ bb-cli list-prs
 
 # List branches (sorted by most recent)
 bb-cli branches
+
+# Override workspace and repo for a single command
+bb-cli --workspace=myteam --repo=myrepo list-prs
+bb-cli --workspace=acme --repo=backend create-pr feature/auth main
 ```
 
 ## Using with Claude Code

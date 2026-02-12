@@ -8,18 +8,41 @@ if [ -f "$CONFIG_FILE" ]; then
   source "$CONFIG_FILE"
 fi
 
+# Parse global flags
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --workspace=*)
+      BB_WORKSPACE="${1#*=}"
+      shift
+      ;;
+    --repo=*)
+      BB_REPO="${1#*=}"
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
 usage() {
   echo "Usage:"
-  echo "  bb-cli configure                          - Set up token and defaults"
-  echo "  bb-cli create-pr <source> <dest> [title]   - Create a pull request"
-  echo "  bb-cli list-prs                            - List open pull requests"
-  echo "  bb-cli branches                            - List branches"
+  echo "  bb-cli [--workspace=W] [--repo=R] <command> [args]"
+  echo ""
+  echo "Commands:"
+  echo "  configure                          - Set up token and defaults"
+  echo "  create-pr <source> <dest> [title]  - Create a pull request"
+  echo "  list-prs                           - List open pull requests"
+  echo "  branches                           - List branches"
+  echo ""
+  echo "Flags:"
+  echo "  --workspace=W  - Override configured workspace"
+  echo "  --repo=R       - Override configured repo"
   echo ""
   echo "Examples:"
   echo "  bb-cli create-pr test/pr-automate dev \"My PR title\""
-  echo "  bb-cli create-pr feature/login main"
+  echo "  bb-cli --workspace=myteam --repo=myrepo list-prs"
   echo "  bb-cli branches"
-  echo "  bb-cli list-prs"
 }
 
 configure() {
