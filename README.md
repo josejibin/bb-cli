@@ -2,6 +2,17 @@
 
 A simple CLI tool for Bitbucket pull requests.
 
+## Prerequisites
+
+- **bash** - The script is written in bash
+- **curl** - For API calls
+- **python3** - For JSON formatting (optional, falls back to raw output)
+
+**Platform Support:**
+- ✅ Linux
+- ✅ macOS
+- ✅ Windows (via WSL, Git Bash, or Cygwin)
+
 ## Install
 
 **One-liner:**
@@ -76,12 +87,6 @@ Just ask Claude Code to run commands like:
 "Run bb-cli list-prs"
 "Run bb-cli branches"
 ```
-
-## Requirements
-
-- `bash`
-- `curl`
-- `python3` (for JSON output formatting — falls back to raw output if unavailable)
 
 ## License
 
