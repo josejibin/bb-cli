@@ -40,6 +40,22 @@ bb-cli create-pr test/pr-automate dev "My PR title"
 # Create a PR with auto-generated title
 bb-cli create-pr feature/login main
 
+# Create a draft PR
+bb-cli create-pr --draft feature/wip main "WIP: New feature"
+
+# Create a PR with reviewers
+bb-cli create-pr --reviewers=alice,bob feature/auth main "Add authentication"
+
+# Create a PR with custom description
+bb-cli create-pr --description="This PR adds user authentication" feature/auth main "Add auth"
+
+# Create a PR with AI-generated description from stdin
+echo "## Summary\nAdds user login\n\n## Changes\n- Login form\n- Auth service" | \
+  bb-cli create-pr --description=- feature/auth main "Add authentication"
+
+# Combine multiple flags
+bb-cli create-pr --draft --reviewers=alice,bob --description="Please review" feature/x main "New feature"
+
 # List open pull requests
 bb-cli list-prs
 

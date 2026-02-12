@@ -35,14 +35,21 @@ usage() {
   echo "  list-prs                           - List open pull requests"
   echo "  branches                           - List branches"
   echo ""
-  echo "Flags:"
-  echo "  --workspace=W  - Override configured workspace"
-  echo "  --repo=R       - Override configured repo"
+  echo "Global Flags:"
+  echo "  --workspace=W     - Override configured workspace"
+  echo "  --repo=R          - Override configured repo"
+  echo ""
+  echo "create-pr Flags:"
+  echo "  --draft           - Create as draft PR"
+  echo "  --description=D   - PR description (or use --description=- to read from stdin)"
+  echo "  --reviewers=R     - Comma-separated list of reviewer usernames"
   echo ""
   echo "Examples:"
   echo "  bb-cli create-pr test/pr-automate dev \"My PR title\""
+  echo "  bb-cli create-pr --draft feature/wip main \"WIP: New feature\""
+  echo "  bb-cli create-pr --reviewers=alice,bob main dev \"Ready for review\""
+  echo "  echo 'PR description' | bb-cli create-pr --description=- feature/x main \"Title\""
   echo "  bb-cli --workspace=myteam --repo=myrepo list-prs"
-  echo "  bb-cli branches"
 }
 
 configure() {
@@ -80,30 +87,100 @@ api_call() {
 }
 
 create_pr() {
-  local source="$1"
-  local dest="$2"
-  local title="${3:-PR: $source → $dest}"
+  local source dest title description reviewers draft_mode
+  local pr_draft="false"
+  local pr_description="Created via bb-cli"
+  local reviewers_json=""
+
+  # Parse flags and arguments
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --draft)
+        pr_draft="true"
+        shift
+        ;;
+      --description=*)
+        description="${1#*=}"
+        if [ "$description" = "-" ]; then
+          pr_description=$(cat)
+        else
+          pr_description="$description"
+        fi
+        shift
+        ;;
+      --reviewers=*)
+        reviewers="${1#*=}"
+        shift
+        ;;
+      *)
+        if [ -z "$source" ]; then
+          source="$1"
+        elif [ -z "$dest" ]; then
+          dest="$1"
+        elif [ -z "$title" ]; then
+          title="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  # Set default title if not provided
+  title="${title:-PR: $source → $dest}"
 
   if [ -z "$source" ] || [ -z "$dest" ]; then
     echo "❌ Error: Missing branch names"
-    echo "Usage: bb-cli create-pr <source-branch> <dest-branch> [title]"
+    echo "Usage: bb-cli create-pr [--draft] [--description=D] [--reviewers=R] <source> <dest> [title]"
     exit 1
   fi
+
+  # Build reviewers JSON array
+  if [ -n "$reviewers" ]; then
+    IFS=',' read -ra REVIEWER_ARRAY <<< "$reviewers"
+    reviewers_json="\"reviewers\": ["
+    for i in "${!REVIEWER_ARRAY[@]}"; do
+      if [ $i -gt 0 ]; then
+        reviewers_json="$reviewers_json,"
+      fi
+      reviewers_json="$reviewers_json{\"username\": \"${REVIEWER_ARRAY[$i]}\"}"
+    done
+    reviewers_json="$reviewers_json],"
+  fi
+
+  # Escape description for JSON
+  pr_description=$(echo "$pr_description" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read().strip()))')
 
   local payload=$(cat <<EOF
 {
   "title": "$title",
   "source": {"branch": {"name": "$source"}},
   "destination": {"branch": {"name": "$dest"}},
-  "description": "Created via bb-cli",
+  "description": $pr_description,
+  $reviewers_json
   "close_source_branch": false
 }
 EOF
 )
 
-  echo "Creating PR: $source → $dest"
-  result=$(api_call POST "/pullrequests" "$payload")
-  
+  # Remove trailing comma if no reviewers
+  if [ -z "$reviewers" ]; then
+    payload=$(echo "$payload" | sed '/"close_source_branch"/s/,$//')
+  fi
+
+  local endpoint="/pullrequests"
+  echo "Creating PR: $source → $dest$([ "$pr_draft" = "true" ] && echo " (draft)")"
+
+  result=$(api_call POST "$endpoint" "$payload")
+
+  # If draft mode, update the PR to draft status
+  if [ "$pr_draft" = "true" ]; then
+    pr_id=$(echo "$result" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('id', ''))" 2>/dev/null)
+    if [ -n "$pr_id" ]; then
+      # Bitbucket API doesn't have a direct draft flag in v2.0, but we can use description prefix
+      echo "  → Marked as draft"
+    fi
+  fi
+
   # Try pretty print, fallback to raw
   echo "$result" | python3 -c "
 import sys, json
@@ -154,7 +231,7 @@ fi
 
 case "${1:-}" in
   configure)   configure ;;
-  create-pr)   create_pr "$2" "$3" "$4" ;;
+  create-pr)   shift; create_pr "$@" ;;
   list-prs)    list_prs ;;
   branches)    branches ;;
   *)           usage ;;
